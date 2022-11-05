@@ -24,9 +24,15 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.image_view.setScene(self.scene) #set a graphics scene in QGraphicsView
         self.scene1 = QGraphicsScene()
         self.original_view.setScene(self.scene1) #set a graphics scene in QGraphicsView
+        self.scene2 = QGraphicsScene()
+        self.edited_view.setScene(self.scene2) #set a graphics scene in QGraphicsView
         self.action_open.triggered.connect(self.browse_files) # call browse_files when Open is clicked in menubar
         self.zoom_button.clicked.connect(self.zooming)
         self.plot_T()
+        self.nearest_button.clicked.connect(self.rotate_nearest)
+        self.bilinear_button.clicked.connect(self.rotate_bilinear)
+        self.shear_button.clicked.connect(self.shear)
+        
     
     def browse_files(self): #browse device to open any file
         try:
@@ -224,12 +230,15 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setWindowTitle("Error")
             msg.exec_()
 
-    def nearest_neighbor(self, image_array, new_height, new_width, factor):
+    def nearest_neighbor(self, image_array, height, width, new_height, new_width, factor):
         new_arr = np.zeros((new_height, new_width)) # 2D array of zeros with size same as zoomed image
         # replace the zeros with the correct pixel data 
         for i in range(new_height):
             for j in range(new_width):
-                new_arr[i,j] =  image_array[int(np.floor(i/factor)), int(np.floor(j/factor))] 
+                if i/factor > (height - 1) or j/factor > (width -1):
+                    new_arr[i,j] =  image_array[int(i/factor), int(j/factor)]
+                else:
+                    new_arr[i,j] =  image_array[round(i/factor), round(j/factor)]
 
         # display image
         im = Image.fromarray(np.uint8(new_arr))
@@ -264,7 +273,6 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         new_pixel += c * dx * (1 - dy) # 1 - dy because here dy will be zero
         new_pixel += d * dx * dy 
         return round(new_pixel)
-
 
     def resize_image(self, image_arr, new_height, new_width, factor):
         new_image = np.zeros((new_height, new_width)) # 2D array of zeros with size same as zoomed image
@@ -324,10 +332,10 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             
                 width = image_array.shape[1]
                 height = image_array.shape[0]
-                new_width = int(factor * width)
-                new_height = int(factor * height)
+                new_width = int(np.ceil(factor * width))
+                new_height = int(np.ceil(factor * height))
                 
-                self.nearest_neighbor(image_array, new_height, new_width, factor) # call nearest neighbor interpolation function
+                self.nearest_neighbor(image_array, height, width, new_height, new_width, factor) # call nearest neighbor interpolation function
 
                 # call bilinear and show image
                 im = Image.fromarray(np.uint8(self.resize_image(image_array, new_height, new_width, factor)))
@@ -355,10 +363,13 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setInformativeText('An error has occured')
             msg.setWindowTitle("Error")
             msg.exec_()
+    
     def plot_T(self):
+        # generate an image with a black background and white T with the specified dimensions
         T_image = np.zeros((128,128))
         T_image[29:49,29:99] = 255
         T_image[49:99,54:74] = 255
+        # plot the array values in matplotlib to show it as an image with axes
         self.scene1.clear()    
         figure = Figure()
         ax = figure.gca() 
@@ -367,9 +378,186 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.scene1.addWidget(canvas) 
         self.original_view.setScene(self.scene1) 
 
+    def rotate_nearest(self):
+        try:
+            # 2D array to generate T image
+            image = np.zeros((128,128))
+            image[29:49,29:99] = 255
+            image[49:99,54:74] = 255
+            # get input angle from the user and multiply by negative to follow the convention that +ve angles rotate anticlockwise
+            angle = float(-self.angle_spinbox.value())
+            # display the direction of rotation for the input angle
+            self.direction_line.clear()
+            if angle > 0:
+                self.direction_line.setText("Clockwise")
+            elif angle < 0:
+                self.direction_line.setText("Anticlockwise")
+            elif angle == 0:
+                self.direction_line.setText("No Rotation")
+            #calculate sin and cos the angle
+            angle = math.radians(angle)                               
+            cosine = math.cos(angle)
+            sine = math.sin(angle)
+            width = image.shape[1]   
+            height = image.shape[0]                               
+            # array of zeros of the image size
+            output = np.zeros((height,width))
+            # Find the center of the image to perform fixed point rotation
+            center_height = round(((height + 1)/2))    
+            center_width = round(((width + 1)/2)) 
+
+            for i in range(height):
+                for j in range(width):
+                    # coordinates of pixel with respect to the center of image
+                    y = i - center_height                   
+                    x = j - center_width 
+                    
+                    # coordinates of pixel with respect to the rotated image using condition for nearest neighbor interpolation (rotation matrix)
+                    if x > (height - 1) or y > (width -1):
+                        new_y = int(-x * sine + y * cosine)
+                        new_x = int(x * cosine + y * sine)
+                    else:
+                        new_y = round(-x * sine + y * cosine)
+                        new_x = round(x * cosine + y * sine)
+                        
+                    # return the center coordinates to the center of the image rather than zero
+                    new_y = new_y + center_height
+                    new_x = new_x + center_width
+                    
+                    # if the coordinate is within the box of the image place the new values into thhe output array that was filled with zeros
+                    if 0 <= new_x < width and 0 <= new_y < height and new_x>=0 and new_y>=0:
+                        output[i,j] = image[new_y,new_x]  
+
+            # display the edited image
+            self.scene2.clear()    
+            figure = Figure()
+            ax = figure.gca() 
+            ax.imshow(output, cmap=plt.cm.gray) 
+            canvas = FigureCanvas(figure) 
+            self.scene2.addWidget(canvas) 
+            self.edited_view.setScene(self.scene2) 
+        except:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
     
 
+    def rotate_bilinear(self):
+        try:
+            # 2D array to generate T image
+            image = np.zeros((128,128))
+            image[29:49,29:99] = 255
+            image[49:99,54:74] = 255
+            # get input angle from the user and multiply by negative to follow the convention that +ve angles rotate anticlockwise
+            angle = float(-self.angle_spinbox.value())
+            # display the direction of rotation for the input angle
+            self.direction_line.clear()
+            if angle > 0:
+                self.direction_line.setText("Clockwise")
+            elif angle < 0:
+                self.direction_line.setText("Anticlockwise")
+            elif angle == 0:
+                self.direction_line.setText("No Rotation")
+
+            #calculate sin and cos the angle
+            angle = math.radians(angle)                               
+            cosine = math.cos(angle)
+            sine = math.sin(angle)
+            width = image.shape[1]   
+            height = image.shape[0]                               
+            # array of zeros of the image size
+            output = np.zeros((height,width))
+            # Find the center of the image to perform fixed point rotation
+            center_height = round(((height + 1)/2))    
+            center_width = round(((width + 1)/2)) 
+
+            for i in range(height):
+                for j in range(width):
+                    #co-ordinates of pixel with respect to the center of image
+                    y = i - center_height
+                    x = j - center_width 
+                    
+                    #co-ordinate of pixel with respect to the rotated image (rotation matrix)
+                    new_y = -x * sine + y * cosine
+                    new_x = x * cosine + y * sine
+
+                    # return the center coordinates to the center of the image rather than zero
+                    new_y = new_y + center_height
+                    new_x = new_x + center_width
+
+                    # use bilinear interpolation to find the missing pixel values
+                    output[i, j] = self.bilinear_interpolation(image, new_y, new_x)
+
+            # display the edited image
+            self.scene2.clear()    
+            figure = Figure()
+            ax = figure.gca() 
+            ax.imshow(output, cmap=plt.cm.gray) 
+            canvas = FigureCanvas(figure) 
+            self.scene2.addWidget(canvas) 
+            self.edited_view.setScene(self.scene2) 
+        except:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+    
+    
+    def shear(self):
+        try:
+            # 2D array to generate T image
+            image = np.zeros((128,128))
+            image[29:49,29:99] = 255
+            image[49:99,54:74] = 255
+            width = image.shape[1]   
+            height = image.shape[0]                               
+            # array of zeros same as the image size
+            output = np.zeros((height,width))
+            #Find the center of the image
+            center_height = round(((height + 1)/2))    
+            center_width = round(((width + 1)/2)) 
+
+            for i in range(height):
+                for j in range(width):
+                    # co-ordinates of pixel with respect to the center of image
+                    y = i - center_height               
+                    x = j - center_width 
+                    
+                    # shearing using horizontal shearing matrix
+                    new_x = x - y
+                    new_y = y
+                    
+                    # return the center of the image to the center
+                    new_y = new_y + center_height
+                    new_x = new_x + center_width
+                    
+                    if 0 <= new_x < width and 0 <= new_y < height and new_x>=0 and new_y>=0:
+                        output[i,j] = image[new_y,new_x]
+                    else:
+                         output[i,j] = 255
+
+            self.scene2.clear()    
+            figure = Figure()
+            ax = figure.gca() 
+            ax.imshow(output, cmap=plt.cm.gray) 
+            canvas = FigureCanvas(figure) 
+            self.scene2.addWidget(canvas) 
+            self.edited_view.setScene(self.scene2)
+        except:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+    
             
+          
 app = QtWidgets.QApplication(sys.argv)
 window = Ui()
 app.exec_()
