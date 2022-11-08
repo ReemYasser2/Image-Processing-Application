@@ -12,6 +12,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import magic
 import numpy as np
 import math 
+from collections import Counter
   
 
 class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
@@ -26,14 +27,37 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.original_view.setScene(self.scene1) #set a graphics scene in QGraphicsView
         self.scene2 = QGraphicsScene()
         self.edited_view.setScene(self.scene2) #set a graphics scene in QGraphicsView
+        self.scene3 = QGraphicsScene()
+        self.orig_hist_view.setScene(self.scene3) #set a graphics scene in QGraphicsView
+        self.scene4 = QGraphicsScene()
+        self.equal_hist_view.setScene(self.scene4) #set a graphics scene in QGraphicsView
         self.action_open.triggered.connect(self.browse_files) # call browse_files when Open is clicked in menubar
         self.zoom_button.clicked.connect(self.zooming)
         self.plot_T()
         self.nearest_button.clicked.connect(self.rotate_nearest)
         self.bilinear_button.clicked.connect(self.rotate_bilinear)
         self.shear_button.clicked.connect(self.shear)
+        self.action_open.triggered.connect(self.show_image_tab4)
+        self.orig_histogram.clicked.connect(self.original_histogram)
+        self.equal_histogram.clicked.connect(self.equalized_histogram)
+        self.equal_img.clicked.connect(self.equalized_image)
+        self.histogram_flag = 0
         
-    
+    def check_tab(self):
+        return self.tab_widget.currentIndex() 
+        
+    def clear_tab_1(self):
+        self.width_line.clear() 
+        self.height_line.clear() 
+        self.size_line.clear()
+        self.color_line.clear()
+        self.depth_line.clear()
+        self.modality_line.clear()
+        self.name_line.clear()
+        self.age_line.clear()
+        self.part_line.clear()
+        self.tab4_check = 0
+
     def browse_files(self): #browse device to open any file
         try:
             self.file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Open File') #qt function to open file browser, no specified type so it opens all files
@@ -51,15 +75,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                 self.obtain_data()
         except:
             # clearing past entries
-            self.width_line.clear() 
-            self.height_line.clear() 
-            self.size_line.clear()
-            self.color_line.clear()
-            self.depth_line.clear()
-            self.modality_line.clear()
-            self.name_line.clear()
-            self.age_line.clear()
-            self.part_line.clear()
+            self.clear_tab_1()
             self.scene.clear()
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Critical)
@@ -69,20 +85,21 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.exec_()
     
     def show_image(self): # shows any common image type (jpg, bmp, png, etc.)
-        try:
-            self.scene.clear() # clears the scene of the past image to show new image
-            self.image = QImage(self.file_path) #places the selected file as the image QImage class allows direct access to the pixel data to represent an image
-            pic = QGraphicsPixmapItem() # QGraphicsPixmapItem class to create a pixmap that can added to a QGraphicsScene, constructing an item
-            pic.setPixmap(QPixmap.fromImage(self.image)) # QImage conversion into a QPixmap using fromImage() and setting it as the Pixmap
-            self.image_view.fitInView(pic, QtCore.Qt.KeepAspectRatio) # make image fit in the Graphics View while keeping the aspevct ratio
-            self.scene.addItem(pic) # add the image item to the created scene 
-        except:
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Critical)
-            msg.setText("ERROR")
-            msg.setInformativeText('An error has occured')
-            msg.setWindowTitle("Error")
-            msg.exec_()
+        if self.check_tab() == 0:
+            try:
+                self.scene.clear() # clears the scene of the past image to show new image
+                self.image = QImage(self.file_path) #places the selected file as the image QImage class allows direct access to the pixel data to represent an image
+                pic = QGraphicsPixmapItem() # QGraphicsPixmapItem class to create a pixmap that can added to a QGraphicsScene, constructing an item
+                pic.setPixmap(QPixmap.fromImage(self.image)) # QImage conversion into a QPixmap using fromImage() and setting it as the Pixmap
+                self.image_view.fitInView(pic, QtCore.Qt.KeepAspectRatio) # make image fit in the Graphics View while keeping the aspevct ratio
+                self.scene.addItem(pic) # add the image item to the created scene 
+            except:
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Critical)
+                msg.setText("ERROR")
+                msg.setInformativeText('An error has occured')
+                msg.setWindowTitle("Error")
+                msg.exec_()
     
     def obtain_data(self): # gets and displays the data related to the opened image
         #getting the data
@@ -102,6 +119,9 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             depth = math.ceil(math.log((int(max) - int(min) + 1), 2)) 
             depth_channels = self.num_channels * depth # calculate depth using min, max, and number of channels
             width, height = img.size # get image width and height
+            if depth_channels == 0:
+                depth_channels = 1
+                depth = 1
             size_bits = width * height * depth # calculate size in bits
 
             # determine image color (RGB, Greyscale, Binary) from min, max, and number of channels
@@ -119,15 +139,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                 self.color = "Other"
           
             # clearing past entries
-            self.width_line.clear() 
-            self.height_line.clear() 
-            self.size_line.clear()
-            self.color_line.clear()
-            self.depth_line.clear()
-            self.modality_line.clear()
-            self.name_line.clear()
-            self.age_line.clear()
-            self.part_line.clear()
+            self.clear_tab_1()
 
             #displaying the data in GUI
             self.width_line.setText(str(width)) 
@@ -161,18 +173,9 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
             self.scene.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
             self.image_view.setScene(self.scene) # set the scene in the ui's graphics view
-            print(ds.pixel_array.shape)
         
             # clearing past displayed data
-            self.width_line.clear() 
-            self.height_line.clear() 
-            self.size_line.clear()
-            self.color_line.clear()
-            self.depth_line.clear()
-            self.modality_line.clear()
-            self.name_line.clear()
-            self.age_line.clear()
-            self.part_line.clear()
+            self.clear_tab_1()
 
             # displaying required data with condition in case an attribute is not in a .dcm file
             if hasattr(ds, 'Columns'):
@@ -245,7 +248,6 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         qimg = im.toqpixmap() # create qpixmap to display image in Qlabel
         self.neighbor_label.clear() # clear past images
         self.neighbor_label.setPixmap(qimg) # set the created pixmap in the label
-        # self.neighbor_label.setPixmap(qimg.scaled(650,700)) # for re-scaling
     
     def bilinear_interpolation(self, image_arr, y, x):
         height = image_arr.shape[0]
@@ -342,7 +344,6 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                 qimg = im.toqpixmap()
                 self.bilinear_label.clear()
                 self.bilinear_label.setPixmap(qimg)
-                # self.bilinear_label.setPixmap(qimg.scaled(650,700)) # for re-scaling
                 self.new_width_line.clear() 
                 self.new_height_line.clear()
                 self.new_width_line.setText(str(new_width)) # show new width after zooming
@@ -444,7 +445,6 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setWindowTitle("Error")
             msg.exec_()
     
-
     def rotate_bilinear(self):
         try:
             # 2D array to generate T image
@@ -507,7 +507,6 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setWindowTitle("Error")
             msg.exec_()
     
-    
     def shear(self):
         try:
             # 2D array to generate T image
@@ -538,8 +537,6 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                     
                     if 0 <= new_x < width and 0 <= new_y < height and new_x>=0 and new_y>=0:
                         output[i,j] = image[new_y,new_x]
-                    else:
-                         output[i,j] = 255
 
             self.scene2.clear()    
             figure = Figure()
@@ -556,8 +553,177 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setWindowTitle("Error")
             msg.exec_()
     
-            
-          
+    def show_image_tab4(self):
+        try:
+            if self.check_tab() == 3:
+                self.origin_img_lbl.clear()
+                if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                    ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                    new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                    scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                    scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                    image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
+                else:
+                    image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+
+                # display the results
+                im = Image.fromarray(np.uint8(image_np_array))
+                qimg = im.toqpixmap()
+                self.origin_img_lbl.setPixmap(qimg)
+                self.scene3.clear()
+                self.scene4.clear()
+                self.equal_img_lbl.clear()
+        except:
+            self.scene3.clear()
+            self.scene4.clear()
+            self.equal_img_lbl.clear()
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+    
+    def histogram(self, image_array):
+        try:
+            resolution = len(image_array)
+            # count the frequencies of each pixel value
+            counts = Counter(image_array) # ordered from most frequent to least
+            pixel_value = np.zeros(self.max_depth)
+            self.normalized_count = np.zeros(self.max_depth)
+            count = np.zeros(self.max_depth) # counts is of type Counter, so convert to array to be able to divide by resolution 
+
+            # for the values from 0 to max (255 for example)
+            for i in range(self.max_depth):
+                count[i] = int(counts[i]) # place values in the array
+                self.normalized_count[i] = (counts[i]) / resolution # calculate the normalized count (probability), y axis of histogram
+                pixel_value[i] = int(i) # array of possible pixel values as integers, x axis of histogram
+            result = [pixel_value, self.normalized_count]
+            return result
+        except:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+    def original_histogram(self):
+        try:
+            self.histogram_flag = 1
+            if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                    ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                    new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                    scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                    self.max_depth = 256
+                    scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                    image_np_array = np.asarray(scaled_image)
+                    self.height = ds.Rows
+                    self.width = ds.Columns
+            else:
+                # open the image and convert to greyscale
+                image = Image.open(self.file_path).convert("L")
+                self.height = image.size[0]
+                self.width = image.size[1]
+                # read image pixel values as an array
+                image_np_array = np.asarray(Image.open(self.file_path).convert("L")) # read a 2D array of image pixel data
+                # calculate max possible pixel values (0 - 255 for example)
+                max = np.amax(image)
+                depth = math.ceil(math.log((int(max) + 1), 2))
+                self.max_depth = 2 ** depth
+
+            # reshape image array to be 1D for further use of the array, note that image_1d is not writable because it's the image array 
+            self.image_1d = image_np_array.reshape(-1)
+            # relocate the values into a writable array to be used when writing values into the equalized image
+            hist_input = self.histogram(self.image_1d) # call histogram function with the image array
+
+            # display the result
+            self.scene3.clear()    
+            fig = Figure()
+            ax = fig.gca() 
+            ax.bar(hist_input[0], hist_input[1]) 
+            # ax.set_ylim(top = 1)
+
+            canvas = FigureCanvas(fig) 
+            self.scene3.addWidget(canvas) 
+            canvas.setGeometry(0, 0, 580, 320)
+            self.orig_hist_view.setScene(self.scene3)
+
+        except:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+                    
+    def equalized_image(self):
+        try:
+            if self.histogram_flag != 1: # check that buttons are pressed in the correct sequence
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Critical)
+                msg.setText("ERROR")
+                msg.setInformativeText('Please click button 1 first')
+                msg.setWindowTitle("Error")
+                msg.exec_()
+            else:
+                self.histogram_flag = 2
+                new_pixel_vals = np.zeros(self.max_depth) # create array for new pixel values (sk)
+                CDF = 0
+                for i in range(len(self.normalized_count)):
+                    CDF += self.normalized_count[i] # calculate CDF for new pixel values
+                    new_pixel_vals[i] = round((self.max_depth -1) * CDF) # calculate the new pixel values
+                    
+                equalized_image = np.zeros((self.width, self.height)) # create array of image size
+                self.equalized_image_1d = equalized_image.reshape(-1) # reshape it to 1D for ease of comparison with new pixel values
+                for i in range(len(self.image_1d)):
+                    self.equalized_image_1d[i] = new_pixel_vals[self.image_1d[i]] # replace the new pixel value with the corresponding old pixel value
+                
+                # display the results
+                im = Image.fromarray(np.uint8(equalized_image))
+                qimg = im.toqpixmap()
+                self.equal_img_lbl.clear()
+                self.equal_img_lbl.setPixmap(qimg)
+        except:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+    def equalized_histogram(self):
+        try:
+            if self.histogram_flag != 2: # check that buttons are pressed in the correct sequence
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Critical)
+                msg.setText("ERROR")
+                msg.setInformativeText('Please click button 2 first')
+                msg.setWindowTitle("Error")
+                msg.exec_()
+            else:
+                self.histogram_flag = 3 
+                # call the histogram function on the equalized image's array
+                hist = self.histogram(self.equalized_image_1d)
+
+                # display the result
+                self.scene4.clear()    
+                fig = Figure()
+                ax = fig.gca() 
+                ax.bar(hist[0], hist[1]) 
+                # ax.set_ylim(top = 1)
+                canvas = FigureCanvas(fig) 
+                self.scene4.addWidget(canvas) 
+                canvas.setGeometry(0, 0, 580, 320)
+                self.equal_hist_view.setScene(self.scene4)
+        except: 
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+             
 app = QtWidgets.QApplication(sys.argv)
 window = Ui()
 app.exec_()
