@@ -13,7 +13,44 @@ import magic
 import numpy as np
 import math 
 from collections import Counter
-  
+import random
+from random import randint
+
+def quicksort(array):
+    if len(array) < 2:
+        return array
+    low, same, high = [], [], []
+    pivot = array[randint(0, len(array) - 1)]
+    for item in array:
+        if item < pivot:
+            low.append(item)
+        elif item == pivot:
+            same.append(item)
+        elif item > pivot:
+            high.append(item)
+    return quicksort(low) + same + quicksort(high)
+
+def rescale_intensities(image_arr, width, height):
+        # rescale the pixel intensities to be between 0 and 255
+        for i in range(height):
+            for j in range(width):
+                if image_arr[i][j] < 0:
+                    image_arr[i][j] = 0
+                elif image_arr[i][j] > 255:
+                    image_arr[i][j] = 255
+        return image_arr
+
+
+def zero_pad(kernel_size, img_height, img_width, image_array): # add zero padding to the image
+    kernel_pad = kernel_size // 2 # thickness of padding "frame"
+    padded_image = np.zeros((img_height + (kernel_size - 1), img_width + (kernel_size - 1))) # setting array of the size of the padded image
+    # starting at the position where the first image pixel is, which is going to be the kernel center
+    # ending at the image dimension + the amount padded
+    for i in range(kernel_pad, img_height + kernel_pad):
+        for j in range(kernel_pad, img_width + kernel_pad):
+            padded_image[i][j] = image_array[i - kernel_pad][j - kernel_pad] # inserting image data within the frame of the padding
+    return padded_image
+    
 
 class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
     def __init__(self):
@@ -38,9 +75,16 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.bilinear_button.clicked.connect(self.rotate_bilinear)
         self.shear_button.clicked.connect(self.shear)
         self.action_open.triggered.connect(self.show_image_tab4)
+        self.action_open.triggered.connect(self.show_image_tab5)
+        self.unsharp_button.clicked.connect(self.highboost_enhancement)
+        self.shear_button.clicked.connect(self.shear) 
         self.orig_histogram.clicked.connect(self.original_histogram)
         self.equal_histogram.clicked.connect(self.equalized_histogram)
-        self.equal_img.clicked.connect(self.equalized_image)
+        self.unsharp_button.clicked.connect(self.highboost_enhancement)
+        self.season_button.clicked.connect(self.seasoning)
+        self.unseason_button.clicked.connect(self.median_filter)
+        self.clear_median_button.clicked.connect(self.clear_median_label)
+        self.clear_highboost_button.clicked.connect(self.clear_higboost_label)
         self.histogram_flag = 0
         
     def check_tab(self):
@@ -563,13 +607,22 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                     scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
                     scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
                     image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
+                    self.height_img = ds.Rows
+                    self.width_img = ds.Columns
                 else:
+                    image = Image.open(self.file_path).convert("L")
+                    self.height_img = image.size[0]
+                    self.width_img = image.size[1]
                     image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
-
+                    
                 # display the results
                 im = Image.fromarray(np.uint8(image_np_array))
                 qimg = im.toqpixmap()
-                self.origin_img_lbl.setPixmap(qimg)
+                if self.height_img > 600 or self.width_img > 340:
+                    self.origin_img_lbl.setPixmap(qimg.scaled(600,340))
+                else: 
+                    self.origin_img_lbl.setPixmap(qimg)
+
                 self.scene3.clear()
                 self.scene4.clear()
                 self.equal_img_lbl.clear()
@@ -618,13 +671,13 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                     self.max_depth = 256
                     scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
                     image_np_array = np.asarray(scaled_image)
-                    self.height = ds.Rows
-                    self.width = ds.Columns
+                    self.height_img = ds.Rows
+                    self.width_img = ds.Columns
             else:
                 # open the image and convert to greyscale
                 image = Image.open(self.file_path).convert("L")
-                self.height = image.size[0]
-                self.width = image.size[1]
+                self.height_img = image.size[0]
+                self.width_img = image.size[1]
                 # read image pixel values as an array
                 image_np_array = np.asarray(Image.open(self.file_path).convert("L")) # read a 2D array of image pixel data
                 # calculate max possible pixel values (0 - 255 for example)
@@ -634,6 +687,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
 
             # reshape image array to be 1D for further use of the array, note that image_1d is not writable because it's the image array 
             self.image_1d = image_np_array.reshape(-1)
+        
             # relocate the values into a writable array to be used when writing values into the equalized image
             hist_input = self.histogram(self.image_1d) # call histogram function with the image array
 
@@ -674,7 +728,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                     CDF += self.normalized_count[i] # calculate CDF for new pixel values
                     new_pixel_vals[i] = round((self.max_depth -1) * CDF) # calculate the new pixel values
                     
-                equalized_image = np.zeros((self.width, self.height)) # create array of image size
+                equalized_image = np.zeros((self.width_img, self.height_img)) # create array of image size
                 self.equalized_image_1d = equalized_image.reshape(-1) # reshape it to 1D for ease of comparison with new pixel values
                 for i in range(len(self.image_1d)):
                     self.equalized_image_1d[i] = new_pixel_vals[self.image_1d[i]] # replace the new pixel value with the corresponding old pixel value
@@ -683,7 +737,11 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                 im = Image.fromarray(np.uint8(equalized_image))
                 qimg = im.toqpixmap()
                 self.equal_img_lbl.clear()
-                self.equal_img_lbl.setPixmap(qimg)
+                # self.equal_img_lbl.setPixmap(qimg)
+                if self.height_img > 600 or self.width_img > 340:
+                    self.equal_img_lbl.setPixmap(qimg.scaled(600,340))
+                else: 
+                    self.equal_img_lbl.setPixmap(qimg)
         except:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Critical)
@@ -723,8 +781,205 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setInformativeText('An error has occured')
             msg.setWindowTitle("Error")
             msg.exec_()
-             
+    
+    def show_image_tab5(self):
+        try:
+            if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                image_np_array = np.asarray(scaled_image)
+                img_height = ds.Rows
+                img_width = ds.Columns
+            else:
+                # open the image and convert to greyscale
+                image = Image.open(self.file_path).convert("L")
+                image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+                img_height = image.size[0]
+                img_width = image.size[1]
+
+            im = Image.fromarray(np.uint8(image_np_array))
+            qimg = im.toqpixmap()
+            self.orig_img_lbl_5.clear()
+            
+            if img_height > 600 or img_width > 600:
+                self.orig_img_lbl_5.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.orig_img_lbl_5.setPixmap(qimg)
+        except: 
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+    def clear_median_label(self):
+        self.median_img_lbl.clear()
+    
+    def clear_higboost_label(self):
+        self.unsharp_img_lbl.clear()   
+    
+    def highboost_enhancement(self):
+        try:
+            kernel_size = int(self.kernel_size_input.value())
+            multiplication_factor = float(self.mult_factor_input.value())
+            if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                image_np_array = np.asarray(scaled_image)
+                img_height = ds.Rows
+                img_width = ds.Columns
+            else:
+                # open the image and convert to greyscale
+                image = Image.open(self.file_path).convert("L")
+                image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+                img_height = image.size[1]
+                img_width = image.size[0]
+
+            # box kernel creation
+            kernel = np.full((kernel_size,kernel_size), 1/(kernel_size ** 2)) # no need to flip convolution = correlation because kernel is symmetric
+            kernel_pad = kernel_size // 2 # size to pad according to kernel size
+            # image zero padding
+            padded_image = zero_pad(kernel_size, img_height, img_width, image_np_array)
+            padded_width = padded_image.shape[1]
+            padded_height = padded_image.shape[0]
+
+            # convolution
+            convoluted_img = np.zeros((padded_height, padded_width))
+            # print(convoluted_img)
+            for i in range(img_height):
+                for j in range(img_width):
+                    sum_prod = 0 # to calculate center pixel value
+                    for ii in range(kernel_size):
+                        for jj in range(kernel_size):
+                            sum_prod += kernel[ii][jj] * padded_image[ii + i][jj + j] # center pixel = sum of products of kernel over image
+                            # we add i and to the indeces in the padded image because we won't multiply by the padding
+                    convoluted_img[i + kernel_pad][j + kernel_pad] = sum_prod  # place the calculated, filtered values in a new 2D array
+
+            subtraction_img = padded_image - convoluted_img # perform subtraction between original (padded because of size) image and filtered one
+            multiplication_img  = (multiplication_factor * subtraction_img) + padded_image # perform multiplication by a factor and then add the original image to have a highboost filter
+            final = rescale_intensities(multiplication_img, padded_width, padded_height) # rescale by clipping the values from 0 to 255
+            clipped_image = final[kernel_pad : img_height + kernel_pad, kernel_pad : img_width + kernel_pad] # remove the border created by the padding
+            # display the image in UI
+            im = Image.fromarray(np.uint8(clipped_image))
+            qimg = im.toqpixmap()
+            self.unsharp_img_lbl.clear()
+            if img_height > 600 or img_width > 600:
+                self.unsharp_img_lbl.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.unsharp_img_lbl.setPixmap(qimg)
+        except: 
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+   
+    def seasoning(self):
+        try:
+            if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                image_np_array = np.asarray(scaled_image)
+                img_height = ds.Rows
+                img_width = ds.Columns
+            else:
+                # open the image and convert to greyscale
+                image = Image.open(self.file_path).convert("L")
+                image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+                img_height = image.size[1]
+                img_width = image.size[0]
+
+            resolution = img_width * img_height
+            percentage = int(self.percent_noise_input.value()) # percentage of pixels the user wants to add noise to
+
+            self.seasoned_img = np.zeros((img_height, img_width)) # self.seasoned_img is a writable version of image_np_array
+            for i in range(img_height):
+                for j in range(img_width):
+                    self.seasoned_img[i][j] = image_np_array[i][j]
+
+            # seasoning 
+            number_of_pixels = int((percentage/200) * resolution) # number of pixels to be changed in EACH color (black and white)
+
+            for i in range(number_of_pixels):
+                # randomly choose pixels to change their value
+                y_coord=random.randint(0, img_height - 1) 
+                x_coord=random.randint(0, img_width - 1)
+                self.seasoned_img[y_coord][x_coord] = 255 # change their values to white
+
+            for i in range(number_of_pixels):
+                # randomly choose pixels to change their value
+                y_coord=random.randint(0, img_height - 1)
+                x_coord=random.randint(0, img_width - 1)
+                self.seasoned_img[y_coord][x_coord] = 0 # change their values to black
+
+            im = Image.fromarray(np.uint8(self.seasoned_img))
+            qimg = im.toqpixmap()
+            self.salt_pep_img_lbl.clear()
+            if img_height > 600 or img_width > 600:
+                self.salt_pep_img_lbl.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.salt_pep_img_lbl.setPixmap(qimg)
+        except: 
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+    def median_filter(self):
+        try:
+            kernel_size = int(self.kernel_size_in_snp.value())
+            kernel_pad = kernel_size // 2 # size to pad according to kernel size
+            img_width = self.seasoned_img.shape[1]
+            img_height = self.seasoned_img.shape[0]
+            # image zero padding
+            padded_image = zero_pad(kernel_size, img_height, img_width, self.seasoned_img)
+            padded_width = padded_image.shape[1]
+            padded_height = padded_image.shape[0]
+            # set the array for filtered image and kernel size (user input)
+            median_img = np.zeros((padded_height, padded_width))
+            window = np.zeros((kernel_size, kernel_size))
+
+            for i in range(img_height):
+                for j in range(img_width):
+                    for ii in range(kernel_size):
+                        for jj in range(kernel_size):
+                            window[ii][jj] = padded_image[ii + i][jj + j] # get current window
+                            widow1d = window.flatten() # flatten to handle later
+                            sorted_arr = quicksort(widow1d) # sort to find median
+                            median_val = sorted_arr[int(np.floor(((kernel_size **2) /2)))] # get median term
+                
+                    median_img[i + kernel_pad][j + kernel_pad] = median_val  # store in new image
+
+            clipped_image = median_img[kernel_pad : img_height  + kernel_pad, kernel_pad : img_width + kernel_pad] # remove padding
+            im = Image.fromarray(np.uint8(clipped_image))
+            qimg = im.toqpixmap()
+            
+            if img_height > 600 or img_width > 600:
+                self.median_img_lbl.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.median_img_lbl.setPixmap(qimg)
+        except: 
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+
 app = QtWidgets.QApplication(sys.argv)
 window = Ui()
 app.exec_()
 
+# lower_scale = multiplication_img - np.min(multiplication_img)
+# rescale = 255 *(lower_scale/ np.max(lower_scale))
