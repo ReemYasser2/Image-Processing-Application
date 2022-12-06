@@ -15,6 +15,9 @@ import math
 from collections import Counter
 import random
 from random import randint
+import sys
+from PyQt5.QtCore import Qt
+
 
 def quicksort(array):
     if len(array) < 2:
@@ -58,16 +61,36 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         uic.loadUi('image_viewer.ui', self) # load the .ui file
         self.setWindowTitle("Image Viewer")
         self.show() # Show the GUI
+        # for image viewer (DICOm and normal images)
         self.scene = QGraphicsScene()
         self.image_view.setScene(self.scene) #set a graphics scene in QGraphicsView
+        # for original image in rotation tab
         self.scene1 = QGraphicsScene()
         self.original_view.setScene(self.scene1) #set a graphics scene in QGraphicsView
+        # for rotated image
         self.scene2 = QGraphicsScene()
         self.edited_view.setScene(self.scene2) #set a graphics scene in QGraphicsView
+        # for histogram of opened image
         self.scene3 = QGraphicsScene()
         self.orig_hist_view.setScene(self.scene3) #set a graphics scene in QGraphicsView
+        #for histogram of equalized image
         self.scene4 = QGraphicsScene()
         self.equal_hist_view.setScene(self.scene4) #set a graphics scene in QGraphicsView
+        # for magnitude of FFT
+        self.scenem = QGraphicsScene()
+        self.magnitude_view.setScene(self.scenem) #set a graphics scene in QGraphicsView
+        # for logged magnitude of FFT
+        self.sceneml = QGraphicsScene()
+        self.magnitude_log_view.setScene(self.sceneml) #set a graphics scene in QGraphicsView
+        # for phase of FFT
+        self.sceneph = QGraphicsScene()
+        self.phase_view.setScene(self.sceneph) #set a graphics scene in QGraphicsView
+        # for logged phase of FFT
+        self.scenephl = QGraphicsScene()
+        self.phase_log_view.setScene(self.scenephl) #set a graphics scene in QGraphicsView
+
+        self.histogram_flag = 0
+
         self.action_open.triggered.connect(self.browse_files) # call browse_files when Open is clicked in menubar
         self.zoom_button.clicked.connect(self.zooming)
         self.plot_T()
@@ -85,8 +108,9 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.unseason_button.clicked.connect(self.median_filter)
         self.clear_median_button.clicked.connect(self.clear_median_label)
         self.clear_highboost_button.clicked.connect(self.clear_higboost_label)
-        self.histogram_flag = 0
-        
+        self.action_open.triggered.connect(self.show_image_tab7)
+        self.action_open.triggered.connect(self.fourier_transform)
+                   
     def check_tab(self):
         return self.tab_widget.currentIndex() 
         
@@ -976,10 +1000,126 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setWindowTitle("Error")
             msg.exec_()
 
+    def show_image_tab7(self):
+        try:
+            self.original_img_view.clear()
+            if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
+                self.height_img = ds.Rows
+                self.width_img = ds.Columns
+            else:
+                image = Image.open(self.file_path).convert("L")
+                self.height_img = image.size[0]
+                self.width_img = image.size[1]
+                image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+                
+            # display the results
+            im = Image.fromarray(np.uint8(image_np_array))
+            qimg = im.toqpixmap()
+            if self.height_img > 600 or self.width_img > 600:
+                self.original_img_view.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.original_img_view.setPixmap(qimg)
+
+        except:
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+    def fourier_transform(self):
+        if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                    ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                    new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                    scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                    scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                    image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
+
+        else:
+            image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+
+        ft_image_np = np.fft.fft2(image_np_array)
+        fshift = np.fft.fftshift(ft_image_np)
+        real_component = fshift.real
+        imaginary_component = fshift.imag
+
+        self.magnitude = np.sqrt((real_component ** 2) + (imaginary_component ** 2))
+        self.phase = np.arctan2(imaginary_component, real_component)
+        self.log_magnitude = np.log(self.magnitude + 1)
+        self.log_phase = np.log(self.phase + 2 * math.pi)
+
+        self.display_magnitude()
+        self.display_log_magnitude()
+        self.display_phase()
+        self.display_log_phase()
+
+    def display_magnitude(self):
+
+        self.scenem.clear()
+        # show the dicom image in the GUI       
+        figure = Figure() # using matplotlib's Figure which holds all plot elements
+        ax = figure.gca() # get the current axes
+        # remove appearance of axes to show the image
+        ax.get_xaxis().set_visible(False)
+        ax.get_yaxis().set_visible(False)
+        ax.imshow(self.magnitude, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
+        self.scenem.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
+        self.magnitude_view.setScene(self.scenem) # set the scene in the ui's graphics view
+        self.magnitude_view.fitInView(self.scenem.sceneRect())
+
+    def display_log_magnitude(self):
+
+        self.sceneml.clear()
+        # show the dicom image in the GUI       
+        figure = Figure() # using matplotlib's Figure which holds all plot elements
+        ax = figure.gca() # get the current axes
+        # remove appearance of axes to show the image
+        ax.get_xaxis().set_visible(False)
+        ax.get_yaxis().set_visible(False)
+        ax.imshow(self.log_magnitude, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
+        self.sceneml.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
+        self.magnitude_log_view.setScene(self.sceneml) # set the scene in the ui's graphics view
+        self.magnitude_log_view.fitInView(self.sceneml.sceneRect())
+
+    def display_phase(self):
+
+        self.sceneph.clear()
+        # show the dicom image in the GUI       
+        figure = Figure() # using matplotlib's Figure which holds all plot elements
+        ax = figure.gca() # get the current axes
+        # remove appearance of axes to show the image
+        ax.get_xaxis().set_visible(False)
+        ax.get_yaxis().set_visible(False)
+        ax.imshow(self.phase, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
+        self.sceneph.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
+        self.phase_view.setScene(self.sceneph) # set the scene in the ui's graphics view
+        self.phase_view.fitInView(self.sceneph.sceneRect())
+        
+    def display_log_phase(self):
+
+        self.scenephl.clear()
+        # show the dicom image in the GUI       
+        figure = Figure() # using matplotlib's Figure which holds all plot elements
+        ax = figure.gca() # get the current axes
+        # remove appearance of axes to show the image
+        ax.get_xaxis().set_visible(False)
+        ax.get_yaxis().set_visible(False)
+        ax.imshow(self.log_phase, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
+        self.scenephl.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
+        self.phase_log_view.setScene(self.scenephl) # set the scene in the ui's graphics view
+        self.phase_log_view.fitInView(self.scenephl.sceneRect())
 
 app = QtWidgets.QApplication(sys.argv)
 window = Ui()
 app.exec_()
-
-# lower_scale = multiplication_img - np.min(multiplication_img)
-# rescale = 255 *(lower_scale/ np.max(lower_scale))
