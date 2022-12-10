@@ -33,8 +33,10 @@ def quicksort(array):
             high.append(item)
     return quicksort(low) + same + quicksort(high)
 
-def rescale_intensities(image_arr, width, height):
+def rescale_intensities(image_arr):
         # rescale the pixel intensities to be between 0 and 255
+        height = image_arr.shape[0]
+        width = image_arr.shape[1]
         for i in range(height):
             for j in range(width):
                 if image_arr[i][j] < 0:
@@ -43,8 +45,7 @@ def rescale_intensities(image_arr, width, height):
                     image_arr[i][j] = 255
         return image_arr
 
-
-def zero_pad(kernel_size, img_height, img_width, image_array): # add zero padding to the image
+def zero_pad_image(kernel_size, img_height, img_width, image_array): # add zero padding to the image
     kernel_pad = kernel_size // 2 # thickness of padding "frame"
     padded_image = np.zeros((img_height + (kernel_size - 1), img_width + (kernel_size - 1))) # setting array of the size of the padded image
     # starting at the position where the first image pixel is, which is going to be the kernel center
@@ -53,7 +54,21 @@ def zero_pad(kernel_size, img_height, img_width, image_array): # add zero paddin
         for j in range(kernel_pad, img_width + kernel_pad):
             padded_image[i][j] = image_array[i - kernel_pad][j - kernel_pad] # inserting image data within the frame of the padding
     return padded_image
-    
+
+def zero_pad_kernel(kernel, image): # add zero padding to the image
+    img_height = image.shape[0]
+    img_width = image.shape[1]
+    kernel_height = kernel.shape[0]
+    kernel_width = kernel.shape[1]
+    pad_width = int((img_width - kernel_width) / 2 )
+    pad_height = int((img_height - kernel_height) / 2)
+    padded_kernel = np.zeros((img_height, img_width)) # setting array of the size of the padded image
+    # starting at the position where the first image pixel is, which is going to be the kernel center
+    # ending at the image dimension + the amount padded
+    for i in range(pad_height, kernel_height + pad_height):
+        for j in range(pad_width, kernel_width + pad_width):
+            padded_kernel[i][j] = kernel[i - pad_height][j - pad_width] # inserting image data within the frame of the padding
+    return padded_kernel
 
 class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
     def __init__(self):
@@ -90,6 +105,8 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.phase_log_view.setScene(self.scenephl) #set a graphics scene in QGraphicsView
 
         self.histogram_flag = 0
+        self.flag = 0
+        self.filter_flag = 1
 
         self.action_open.triggered.connect(self.browse_files) # call browse_files when Open is clicked in menubar
         self.zoom_button.clicked.connect(self.zooming)
@@ -102,6 +119,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.unsharp_button.clicked.connect(self.highboost_enhancement)
         self.shear_button.clicked.connect(self.shear) 
         self.orig_histogram.clicked.connect(self.original_histogram)
+        self.equal_img.clicked.connect(self.equalized_image) 
         self.equal_histogram.clicked.connect(self.equalized_histogram)
         self.unsharp_button.clicked.connect(self.highboost_enhancement)
         self.season_button.clicked.connect(self.seasoning)
@@ -109,7 +127,17 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         self.clear_median_button.clicked.connect(self.clear_median_label)
         self.clear_highboost_button.clicked.connect(self.clear_higboost_label)
         self.action_open.triggered.connect(self.show_image_tab7)
-        self.action_open.triggered.connect(self.fourier_transform)
+        self.action_open.triggered.connect(self.show_image_tab8)
+        self.freq_filter_button.clicked.connect(self.clear_freq_filter)
+        self.freq_filter_button.clicked.connect(self.frequency_filter)
+        self.space_filter_button.clicked.connect(self.clear_freq_filter)
+        self.space_filter_button.clicked.connect(self.show_spatial_blur)
+        self.difference_button.clicked.connect(self.clear_freq_filter)
+        self.difference_button.clicked.connect(self.compare_freq_space)
+        self.clear_freq_view.clicked.connect(self.clear_freq_filter)
+        self.mask_button.clicked.connect(self.pattern_removal)
+
+        
                    
     def check_tab(self):
         return self.tab_widget.currentIndex() 
@@ -745,6 +773,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                 msg.setWindowTitle("Error")
                 msg.exec_()
             else:
+                
                 self.histogram_flag = 2
                 new_pixel_vals = np.zeros(self.max_depth) # create array for new pixel values (sk)
                 CDF = 0
@@ -847,7 +876,11 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
     
     def highboost_enhancement(self):
         try:
-            kernel_size = int(self.kernel_size_input.value())
+            if self.flag == 1:
+                kernel_size = self.kernel_size
+            else:
+                kernel_size = int(self.kernel_size_input.value())
+            
             multiplication_factor = float(self.mult_factor_input.value())
             if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
                 ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
@@ -868,13 +901,13 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             kernel = np.full((kernel_size,kernel_size), 1/(kernel_size ** 2)) # no need to flip convolution = correlation because kernel is symmetric
             kernel_pad = kernel_size // 2 # size to pad according to kernel size
             # image zero padding
-            padded_image = zero_pad(kernel_size, img_height, img_width, image_np_array)
+            padded_image = zero_pad_image(kernel_size, img_height, img_width, image_np_array)
             padded_width = padded_image.shape[1]
             padded_height = padded_image.shape[0]
 
             # convolution
             convoluted_img = np.zeros((padded_height, padded_width))
-            # print(convoluted_img)
+
             for i in range(img_height):
                 for j in range(img_width):
                     sum_prod = 0 # to calculate center pixel value
@@ -884,9 +917,10 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                             # we add i and to the indeces in the padded image because we won't multiply by the padding
                     convoluted_img[i + kernel_pad][j + kernel_pad] = sum_prod  # place the calculated, filtered values in a new 2D array
 
+            self.spatial_blurred = convoluted_img[kernel_pad : img_height + kernel_pad, kernel_pad : img_width + kernel_pad]
             subtraction_img = padded_image - convoluted_img # perform subtraction between original (padded because of size) image and filtered one
             multiplication_img  = (multiplication_factor * subtraction_img) + padded_image # perform multiplication by a factor and then add the original image to have a highboost filter
-            final = rescale_intensities(multiplication_img, padded_width, padded_height) # rescale by clipping the values from 0 to 255
+            final = rescale_intensities(multiplication_img) # rescale by clipping the values from 0 to 255
             clipped_image = final[kernel_pad : img_height + kernel_pad, kernel_pad : img_width + kernel_pad] # remove the border created by the padding
             # display the image in UI
             im = Image.fromarray(np.uint8(clipped_image))
@@ -903,7 +937,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setInformativeText('An error has occured')
             msg.setWindowTitle("Error")
             msg.exec_()
-   
+ 
     def seasoning(self):
         try:
             if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
@@ -966,7 +1000,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             img_width = self.seasoned_img.shape[1]
             img_height = self.seasoned_img.shape[0]
             # image zero padding
-            padded_image = zero_pad(kernel_size, img_height, img_width, self.seasoned_img)
+            padded_image = zero_pad_image(kernel_size, img_height, img_width, self.seasoned_img)
             padded_width = padded_image.shape[1]
             padded_height = padded_image.shape[0]
             # set the array for filtered image and kernel size (user input)
@@ -1009,18 +1043,20 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
                 scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
                 scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
                 image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
-                self.height_img = ds.Rows
-                self.width_img = ds.Columns
+                height_img = ds.Rows
+                width_img = ds.Columns
             else:
                 image = Image.open(self.file_path).convert("L")
-                self.height_img = image.size[0]
-                self.width_img = image.size[1]
+                height_img = image.size[0]
+                width_img = image.size[1]
                 image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
-                
+
+            self.fourier_transform(image_np_array)
+
             # display the results
             im = Image.fromarray(np.uint8(image_np_array))
             qimg = im.toqpixmap()
-            if self.height_img > 600 or self.width_img > 600:
+            if height_img > 600 or width_img > 600:
                 self.original_img_view.setPixmap(qimg.scaled(600,600))
             else: 
                 self.original_img_view.setPixmap(qimg)
@@ -1034,31 +1070,31 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
             msg.setWindowTitle("Error")
             msg.exec_()
 
-    def fourier_transform(self):
-        if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
-                    ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
-                    new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
-                    scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
-                    scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
-                    image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
+    def fourier_transform(self, array):
+        try:
+            self.ft_image_np = np.fft.fft2(array)
+            self.fshift = np.fft.fftshift(self.ft_image_np)
+            self.real_component = self.fshift.real
+            self.imaginary_component = self.fshift.imag
 
-        else:
-            image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+            self.magnitude = np.sqrt((self.real_component ** 2) + (self.imaginary_component ** 2))
+            self.phase = np.arctan2(self.imaginary_component, self.real_component)
+            self.log_magnitude = np.log(self.magnitude + 1)
+            self.log_phase = np.log(self.phase + 2 * math.pi)
+            self.display_magnitude()
+            self.display_log_magnitude()
+            self.display_phase()
+            self.display_log_phase()
+        except:
 
-        ft_image_np = np.fft.fft2(image_np_array)
-        fshift = np.fft.fftshift(ft_image_np)
-        real_component = fshift.real
-        imaginary_component = fshift.imag
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
 
-        self.magnitude = np.sqrt((real_component ** 2) + (imaginary_component ** 2))
-        self.phase = np.arctan2(imaginary_component, real_component)
-        self.log_magnitude = np.log(self.magnitude + 1)
-        self.log_phase = np.log(self.phase + 2 * math.pi)
-
-        self.display_magnitude()
-        self.display_log_magnitude()
-        self.display_phase()
-        self.display_log_phase()
+        return self.fshift
 
     def display_magnitude(self):
 
@@ -1069,7 +1105,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         # remove appearance of axes to show the image
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
-        ax.imshow(self.magnitude, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        ax.imshow(self.magnitude, interpolation = "None", cmap="gray") # take pixel data from dicom file and display the data as an image in the bone color map
         canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
         self.scenem.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
         self.magnitude_view.setScene(self.scenem) # set the scene in the ui's graphics view
@@ -1084,7 +1120,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         # remove appearance of axes to show the image
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
-        ax.imshow(self.log_magnitude, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        ax.imshow(self.log_magnitude, interpolation = "None", cmap="gray") # take pixel data from dicom file and display the data as an image in the bone color map
         canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
         self.sceneml.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
         self.magnitude_log_view.setScene(self.sceneml) # set the scene in the ui's graphics view
@@ -1099,7 +1135,7 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         # remove appearance of axes to show the image
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
-        ax.imshow(self.phase, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        ax.imshow(self.phase, interpolation = "None", cmap="gray") # take pixel data from dicom file and display the data as an image in the bone color map
         canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
         self.sceneph.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
         self.phase_view.setScene(self.sceneph) # set the scene in the ui's graphics view
@@ -1114,11 +1150,187 @@ class Ui(QtWidgets.QMainWindow): # class to load .ui in constructor
         # remove appearance of axes to show the image
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
-        ax.imshow(self.log_phase, interpolation = "None", cmap="gray", vmin = 0) # take pixel data from dicom file and display the data as an image in the bone color map
+        ax.imshow(self.log_phase, interpolation = "None", cmap="gray") # take pixel data from dicom file and display the data as an image in the bone color map
         canvas = FigureCanvas(figure) # pass the figure to Figure canvas which handles all the details of talking to user interface toolkits (pyqt in this case)
         self.scenephl.addWidget(canvas) # add a widget to the scene in QGraphicsView and use canvas to interface with matplotlib
         self.phase_log_view.setScene(self.scenephl) # set the scene in the ui's graphics view
         self.phase_log_view.fitInView(self.scenephl.sceneRect())
+
+    def show_image_tab8(self):
+        try:
+            self.orig_img_tab8.clear()
+            if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                self.image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
+                self.height_img = ds.Rows
+                self.width_img = ds.Columns
+            else:
+                image = Image.open(self.file_path).convert("L")
+                self.height_img = image.size[0]
+                self.width_img = image.size[1]
+                self.image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+
+
+
+            # display the results
+            im = Image.fromarray(np.uint8(self.image_np_array))
+            qimg = im.toqpixmap()
+            if self.height_img > 600 or self.width_img > 600:
+                self.orig_img_tab8.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.orig_img_tab8.setPixmap(qimg)
+
+        except:
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+    def clear_freq_filter(self):
+        self.filtered_img_view.clear()
+
+    def frequency_filter(self):
+        try:
+            self.flag = 1
+            self.filter_flag = 1
+            self.filtered_img_view.clear()
+            self.kernel_size = int(self.kernel_size_freq.value())
+            spatial_kernel = np.full((self.kernel_size,self.kernel_size), 1/(self.kernel_size ** 2)) 
+            padded_kernel =  zero_pad_kernel(spatial_kernel, self.image_np_array)
+            kernel_freq = self.fourier_transform(padded_kernel)
+            img_freq = self.fourier_transform(self.image_np_array) #[1]
+            filtered_freq_img = kernel_freq * img_freq
+            restored_img = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(filtered_freq_img))) 
+            real_component = restored_img.real
+            imaginary_component = restored_img.imag
+            restored_img_mag = np.sqrt((real_component ** 2) + (imaginary_component ** 2))
+
+            # display the results
+            im = Image.fromarray(np.uint8(real_component)) #!! restored_img
+            qimg = im.toqpixmap()
+            if self.height_img > 600 or self.width_img > 600:
+                self.filtered_img_view.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.filtered_img_view.setPixmap(qimg)
+        except:
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+        
+        return restored_img_mag 
+
+    def show_spatial_blur(self):
+        try:
+            self.flag = 1
+            self.kernel_size = int(self.kernel_size_freq.value())
+            self.highboost_enhancement()
+            im = Image.fromarray(np.uint8(self.spatial_blurred))
+            qimg = im.toqpixmap()
+            if self.height_img > 600 or self.width_img > 600:
+                self.filtered_img_view.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.filtered_img_view.setPixmap(qimg)
+
+        except:
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+    def compare_freq_space(self):
+        try:
+            self.flag = 1
+            self.kernel_size = int(self.kernel_size_freq.value())
+            self.highboost_enhancement()
+            self.spatial_blurred
+            frequency_filtered_img = self.frequency_filter()
+            # rescaled_frequency = 255*((frequency_filtered_img - np.min(frequency_filtered_img)) / (np.max(frequency_filtered_img) - np.min(frequency_filtered_img)))
+            difference_img = frequency_filtered_img - self.spatial_blurred
+            rescaled_diff = rescale_intensities(difference_img)
+            # rescaled_diff = 255*((difference_img - np.min(difference_img)) / (np.max(difference_img) - np.min(difference_img)))
+
+            im = Image.fromarray(np.uint8(rescaled_diff))
+            qimg = im.toqpixmap()
+            if self.height_img > 600 or self.width_img > 600:
+                self.filtered_img_view.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.filtered_img_view.setPixmap(qimg)
+        
+        except:
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+    
+    def pattern_removal(self):
+        try:
+            if magic.from_file(self.file_path) == 'DICOM medical imaging data' or magic.from_file(self.file_path) == 'TIFF image data, little-endian': # call dicom function if file is dicom by checking file type first
+                    ds = pydicom.dcmread(self.file_path) # read the dicom file dataset
+                    new_image = ds.pixel_array.astype(float) # read the pixel array values as floats
+                    scaled_image = (np.maximum(new_image, 0) / new_image.max()) * 255.0 # scale the values in 8 bits with values between 0 and 255
+                    scaled_image = np.uint8(scaled_image) # 8-bit unsigned integer, used for arrays representing images with the 3 color channels having small integer values (0 to 255).
+                    image_np_array = np.asarray(scaled_image) # place the converted dicom pixel data in an array to be read like other image types
+                    img_height = ds.Rows
+                    img_width = ds.Columns
+            else:
+                image_np_array = np.asarray(Image.open(self.file_path).convert("L"))
+                img_height = image_np_array.shape[0]
+                img_width = image_np_array.shape[1]
+
+            filter_arr = np.full((img_height, img_width), 1)
+            filter_arr[475:495,375:395] = 0
+            filter_arr[555:575,375:395] = 0
+            filter_arr[475:495,325: 340] = 0
+            filter_arr[555:575,325: 340] = 0
+
+            filter_arr[435:455,375:395] = 0
+            filter_arr[435:455,325: 335] = 0
+            filter_arr[605:625,325: 340] = 0
+            filter_arr[605:625,380:395] = 0
+
+            ft_image_np = np.fft.fft2(image_np_array)
+            fshift = np.fft.fftshift( ft_image_np)
+
+            filtered = fshift * filter_arr
+            restored_img = ((np.fft.ifft2(np.fft.ifftshift(filtered))))
+            real_component = restored_img.real
+            imaginary_component = restored_img.imag
+            restored_img_mag = np.sqrt((real_component ** 2) + (imaginary_component ** 2))
+            recaled_restored_img = rescale_intensities(restored_img_mag)
+
+            im = Image.fromarray(np.uint8(recaled_restored_img))
+            qimg = im.toqpixmap()
+            if self.height_img > 600 or self.width_img > 600:
+                self.filtered_img_view.setPixmap(qimg.scaled(600,600))
+            else: 
+                self.filtered_img_view.setPixmap(qimg)
+        except:
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("ERROR")
+            msg.setInformativeText('An error has occured')
+            msg.setWindowTitle("Error")
+            msg.exec_()
+
+
+        
 
 app = QtWidgets.QApplication(sys.argv)
 window = Ui()
